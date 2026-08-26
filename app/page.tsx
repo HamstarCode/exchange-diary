@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type User = {
   nickname: string;
@@ -13,26 +14,26 @@ export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [loaded, setLoaded] = useState(false);
 
- useEffect(() => {
-  console.log("Home useEffect 開始");
+  const router = useRouter();
 
-  const savedUser = localStorage.getItem("user");
-  console.log("savedUser:", savedUser);
+  useEffect(() => {
+    console.log("Home useEffect 開始");
 
-  if (savedUser !== null) {
-    setUser(JSON.parse(savedUser));
-  }
+    const savedUser = localStorage.getItem("user");
+    console.log("savedUser:", savedUser);
 
-  setLoaded(true);
-  console.log("loaded true");
-}, []);
+    if (savedUser !== null) {
+      setUser(JSON.parse(savedUser));
+      setLoaded(true);
+      console.log("ユーザー取得成功");
+    } else {
+      console.log("ユーザーなし → setupへ");
+      router.replace("/setup");
+    }
+  }, [router]);
 
   if (!loaded) {
     return <p>読み込み中...</p>;
-  }
-
-  if (!user) {
-    return <p>ユーザー情報がありません。</p>;
   }
 
   return (
@@ -43,11 +44,11 @@ export default function Home() {
         </h1>
 
         <p className="mt-2 text-gray-600">
-          こんばんは、{user.nickname}さん
+          こんばんは、{user?.nickname}さん
         </p>
 
         <p className="mt-1 text-sm text-gray-500">
-          公開ID：{user.publicUserId}
+          公開ID：{user?.publicUserId}
         </p>
 
         <section className="mt-6 rounded-xl bg-white p-5 shadow-sm">

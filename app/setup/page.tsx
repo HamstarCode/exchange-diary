@@ -19,11 +19,6 @@ export default function SetupPage() {
 
     localStorage.setItem("user", JSON.stringify(user));
 
-    console.log(
-      "保存直後:",
-      localStorage.getItem("user")
-    );
-
     window.location.href = "/";
   };
 
