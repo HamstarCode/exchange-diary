@@ -1,36 +1,66 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 交換日記アプリ
 
-## Getting Started
+1対1で交換日記を行うWebアプリ
 
-First, run the development server:
+## 基本フロー
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+1. ユーザー生成
+2. 交換相手を指定するか、自動マッチングを選択
+3. 交換待機
+4. マッチング
+5. Room生成
+6. 日記交換
+7. 返信
+8. Room解散
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## ユーザー
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- ニックネーム：表示用。変更可能
+- userId：内部でユーザーを識別するためのID
+- publicUserId：相手を指定するときに使用する公開ID
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 指定ポケット
 
-## Learn More
+- 指定ポケットに相手がいる → 指定マッチング
+- 指定ポケットが空 → 自動マッチング
+- 前回の指定は保持する
+- 指定相手は変更・削除可能
 
-To learn more about Next.js, take a look at the following resources:
+## マッチング
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### 相互指定
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+A → B  
+B → A
 
-## Deploy on Vercel
+の場合、マッチング成立。
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### 一方的な指定
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+A → B  
+B → なし
+
+の場合、指定だけではマッチングを成立させない。
+
+### 自動マッチング
+
+指定がないユーザーは、設定した属性をもとにマッチングする。
+
+## 時間
+
+- 募集時間
+- マッチング確定
+- 日記を書く時間
+- 相手の日記を見る時間
+- 返信時間
+
+時間切れになった場合は、その状態を終了する。
+
+## Room
+
+マッチング成立時に1対1のRoomを生成する。
+
+交換終了後、Roomを解散する。
+
+## 今後検討
+- 属性・マッチング条件の詳細
