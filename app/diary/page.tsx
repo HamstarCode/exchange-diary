@@ -1,9 +1,35 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 export default function DiaryPage() {
   const [diary, setDiary] = useState("");
+  const [loaded, setLoaded] = useState(false);
+
+  const router = useRouter();
+
+  useEffect(() => {
+    const savedDiary = localStorage.getItem("draftDiary");
+
+    if (savedDiary !== null) {
+      setDiary(savedDiary);
+    }
+
+    setLoaded(true);
+  }, []);
+
+  const handleConfirm = () => {
+    if (diary.trim() === "") return;
+
+    localStorage.setItem("draftDiary", diary.trim());
+
+    router.push("/diary/confirm");
+  };
+
+  if (!loaded) {
+    return <p>読み込み中...</p>;
+  }
 
   return (
     <main className="min-h-screen bg-gray-50 px-6 py-10">
@@ -12,6 +38,7 @@ export default function DiaryPage() {
           <h1 className="text-2xl font-bold text-gray-900">
             今日の日記
           </h1>
+
           <p className="mt-2 text-sm text-gray-500">
             今日あったことや感じたことを書いてみよう。
           </p>
@@ -31,10 +58,11 @@ export default function DiaryPage() {
             </p>
 
             <button
+              onClick={handleConfirm}
               disabled={diary.trim().length === 0}
               className="rounded-lg bg-gray-900 px-5 py-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-gray-300"
             >
-              提出する
+              確認する
             </button>
           </div>
         </section>
