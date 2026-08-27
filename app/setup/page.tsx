@@ -1,12 +1,16 @@
 "use client";
 
 import { useState } from "react";
+import { supabase } from "@/lib/supabase";
 
 export default function SetupPage() {
   const [nickname, setNickname] = useState("");
+  const [error, setError] = useState("");
 
-  const handleStart = () => {
+  const handleStart = async () => {
     if (nickname.trim() === "") return;
+
+    setError("");
 
     const user = {
       nickname: nickname.trim(),
@@ -17,6 +21,22 @@ export default function SetupPage() {
         .toUpperCase(),
     };
 
+    // Supabaseにユーザーを保存
+    const { error: insertError } = await supabase
+      .from("users")
+      .insert({
+        id: user.userId,
+        public_user_id: user.publicUserId,
+        nickname: user.nickname,
+      });
+
+    if (insertError) {
+      console.error("ユーザー登録エラー:", insertError.message);
+      setError("ユーザー登録に失敗しました。");
+      return;
+    }
+
+    // 今まで通りlocalStorageにも保存
     localStorage.setItem("user", JSON.stringify(user));
 
     window.location.href = "/";
@@ -50,6 +70,12 @@ export default function SetupPage() {
             maxLength={20}
             className="mt-2 w-full rounded-lg border border-gray-200 px-4 py-3 text-sm outline-none focus:border-gray-400"
           />
+
+          {error && (
+            <p className="mt-2 text-sm text-red-500">
+              {error}
+            </p>
+          )}
 
           <button
             onClick={handleStart}

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
 type User = {
   nickname: string;
@@ -13,7 +14,6 @@ type User = {
 type Exchange = {
   id: string;
   date: string;
-
   status: "matching" | "matched";
 
   partner: {
@@ -25,17 +25,12 @@ type Exchange = {
   partnerDiary: string | null;
   myReply: string | null;
   partnerReply: string | null;
+
+  targetPublicUserId: string | null;
 };
 
-// ===== テスト用の日付 =====
 const TEST_TODAY_DATE = "2026/08/29";
 const TEST_PREVIOUS_DATE = "2026/08/28";
-
-// ===== 仮想ユーザー =====
-const MOCK_PARTNER = {
-  publicUserId: "ABC123",
-  nickname: "テストユーザーA",
-};
 
 export default function Home() {
   const router = useRouter();
@@ -43,30 +38,74 @@ export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [exchanges, setExchanges] = useState<Exchange[]>([]);
   const [loaded, setLoaded] = useState(false);
-
-  // =========================
-  // データ読み込み
-  // =========================
+  const [error, setError] = useState("");
 
   useEffect(() => {
     //localStorage.clear();
-    const savedUser = localStorage.getItem("user");
+    const loadData = async () => {
+      const savedUser = localStorage.getItem("user");
 
-    if (savedUser === null) {
-      router.replace("/setup");
-      return;
-    }
+      if (savedUser === null) {
+        router.replace("/setup");
+        return;
+      }
 
-    setUser(JSON.parse(savedUser));
+      const currentUser: User = JSON.parse(savedUser);
+      setUser(currentUser);
 
-    const savedExchanges =
-      localStorage.getItem("exchanges");
+      // =========================
+      // Supabaseから自分のExchangeを取得
+      // =========================
 
-    if (savedExchanges !== null) {
-      setExchanges(JSON.parse(savedExchanges));
-    }
+      const { data, error: fetchError } = await supabase
+        .from("exchanges")
+        .select("*")
+        .eq("user_id", currentUser.userId)
+        .order("date", { ascending: false });
 
-    setLoaded(true);
+      if (fetchError) {
+        console.error(
+          "Exchange取得エラー:",
+          fetchError.message
+        );
+
+        setError("交換データの読み込みに失敗しました。");
+        setLoaded(true);
+        return;
+      }
+
+      // =========================
+      // DBのデータを画面用に変換
+      // =========================
+
+      const convertedExchanges: Exchange[] =
+        (data ?? []).map((exchange) => ({
+          id: exchange.id,
+          date: exchange.date,
+          status: exchange.status,
+
+          partner: exchange.partner_public_user_id
+            ? {
+                publicUserId:
+                  exchange.partner_public_user_id,
+                nickname: "相手",
+              }
+            : null,
+
+          myDiary: exchange.my_diary,
+          partnerDiary: exchange.partner_diary,
+          myReply: exchange.my_reply,
+          partnerReply: exchange.partner_reply,
+
+          targetPublicUserId:
+            exchange.target_public_user_id,
+        }));
+
+      setExchanges(convertedExchanges);
+      setLoaded(true);
+    };
+
+    loadData();
   }, [router]);
 
   // =========================
@@ -108,11 +147,13 @@ export default function Home() {
 
   const hasPreviousPartnerDiary =
     previousMatched &&
-    previousExchange.partnerDiary !== null;
+    previousExchange?.partnerDiary !== null &&
+    previousExchange?.partnerDiary !== undefined;
 
   const hasPreviousMyReply =
     previousMatched &&
-    previousExchange.myReply !== null;
+    previousExchange?.myReply !== null &&
+    previousExchange?.myReply !== undefined;
 
   const needsReply =
     previousMatched &&
@@ -127,10 +168,10 @@ export default function Home() {
     todayExchange !== undefined;
 
   // =========================
-  // テスト用マッチング処理
+  // テスト用マッチング
   // =========================
 
-  const handleMatching = () => {
+  const handleMatching = async () => {
     if (!todayExchange) {
       return;
     }
@@ -139,42 +180,49 @@ export default function Home() {
       return;
     }
 
-    const updatedExchanges = exchanges.map(
-      (exchange) => {
-        if (exchange.id !== todayExchange.id) {
-          return exchange;
-        }
+    const { data, error: updateError } =
+      await supabase
+        .from("exchanges")
+        .update({
+          status: "matched",
+          partner_public_user_id: "ABC123",
+        })
+        .eq("id", todayExchange.id)
+        .select()
+        .single();
 
-        return {
-          ...exchange,
+    if (updateError) {
+      console.error(
+        "マッチング更新エラー:",
+        updateError.message
+      );
 
-          status: "matched" as const,
+      setError("マッチングに失敗しました。");
+      return;
+    }
 
-          partner: {
-            publicUserId:
-              MOCK_PARTNER.publicUserId,
-            nickname:
-              MOCK_PARTNER.nickname,
-          },
-        };
-      }
+    const updatedExchange: Exchange = {
+      ...todayExchange,
+      status: "matched",
+      partner: {
+        publicUserId:
+          data.partner_public_user_id,
+        nickname: "テストユーザーA",
+      },
+    };
+
+    setExchanges((current) =>
+      current.map((exchange) =>
+        exchange.id === todayExchange.id
+          ? updatedExchange
+          : exchange
+      )
     );
-
-    localStorage.setItem(
-      "exchanges",
-      JSON.stringify(updatedExchanges)
-    );
-
-    setExchanges(updatedExchanges);
   };
 
   return (
     <main className="min-h-screen bg-gray-50 px-6 py-10">
       <div className="mx-auto max-w-md">
-
-        {/* =========================
-            ヘッダー
-        ========================= */}
 
         <header className="mb-8">
           <h1 className="text-2xl font-bold text-gray-900">
@@ -190,9 +238,11 @@ export default function Home() {
           </p>
         </header>
 
-        {/* =========================
-            今日の日記
-        ========================= */}
+        {error && (
+          <p className="mb-4 rounded-lg bg-red-50 p-4 text-sm text-red-600">
+            {error}
+          </p>
+        )}
 
         <section className="rounded-xl bg-white p-5 shadow-sm">
           <h2 className="text-lg font-semibold">
@@ -239,24 +289,16 @@ export default function Home() {
           )}
         </section>
 
-        {/* =========================
-            今晩の交換
-        ========================= */}
-
         <section className="mt-4 rounded-xl bg-white p-5 shadow-sm">
           <h2 className="text-lg font-semibold">
             今晩の交換
           </h2>
-
-          {/* まだ今日の日記を提出していない */}
 
           {!todayExchange ? (
             <p className="mt-2 text-sm text-gray-500">
               今日の日記を提出すると交換が始まります。
             </p>
           ) : todayExchange.status === "matching" ? (
-            /* マッチング待機中 */
-
             <>
               <p className="mt-3 font-medium text-gray-800">
                 交換相手を探しています...
@@ -266,8 +308,6 @@ export default function Home() {
                 相手が見つかるまでお待ちください。
               </p>
 
-              {/* テスト用 */}
-
               <button
                 onClick={handleMatching}
                 className="mt-5 w-full rounded-lg bg-gray-900 px-4 py-3 text-sm font-medium text-white"
@@ -276,15 +316,18 @@ export default function Home() {
               </button>
             </>
           ) : (
-            /* マッチング成立 */
-
             <>
               <p className="mt-3 text-sm text-gray-500">
                 交換相手
               </p>
 
               <p className="mt-1 font-medium text-gray-800">
-                {todayExchange.partner?.nickname}
+                {todayExchange.partner?.nickname ?? "相手"}
+              </p>
+
+              <p className="mt-1 text-sm text-gray-500">
+                公開ID：
+                {todayExchange.partner?.publicUserId ?? "不明"}
               </p>
 
               <p className="mt-4 text-sm text-gray-500">
@@ -303,10 +346,6 @@ export default function Home() {
             </>
           )}
         </section>
-
-        {/* =========================
-            日記一覧
-        ========================= */}
 
         <Link
           href="/diaries"

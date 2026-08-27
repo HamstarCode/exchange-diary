@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
 // ===== テスト用の日付 =====
 const TEST_DATE = "2026/08/29";
@@ -33,76 +34,55 @@ export default function ConfirmPage() {
   // 提出
   // =========================
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (diary.trim() === "") return;
 
     const targetId =
       targetPublicUserId.trim().toUpperCase();
 
+    const savedUser = localStorage.getItem("user");
+
+    if (savedUser === null) {
+      setError("ユーザー情報が見つかりません。");
+      return;
+    }
+
+    const user = JSON.parse(savedUser);
+
     setError("");
 
     // =========================
-    // 今回の交換
-    // =========================
-    //
-    // この時点ではまだマッチングしていない。
-    //
-    // targetId があっても、
-    // 相手が確定したわけではない。
-    //
-    // → matching状態で保存
-    // → partnerはnull
-    //
+    // SupabaseにExchangeを保存
     // =========================
 
-    const newExchange = {
-      id: crypto.randomUUID(),
+    const { error: insertError } = await supabase
+      .from("exchanges")
+      .insert({
+        id: crypto.randomUUID(),
+        user_id: user.userId,
+        date: TEST_DATE,
+        status: "matching",
 
-      date: TEST_DATE,
+        target_public_user_id:
+          targetId === "" ? null : targetId,
 
-      status: "matching",
+        partner_public_user_id: null,
 
-      partner: null,
+        my_diary: diary.trim(),
+        partner_diary: null,
+        my_reply: null,
+        partner_reply: null,
+      });
 
-      // 自分の日記
-      myDiary: diary.trim(),
+    if (insertError) {
+      console.error(
+        "Exchange登録エラー:",
+        insertError.message
+      );
 
-      // 相手の日記
-      partnerDiary: null,
-
-      // 自分から相手への返信
-      myReply: null,
-
-      // 相手から自分への返信
-      partnerReply: null,
-
-      // 指定した相手がいる場合は
-      // マッチング条件として保存
-      targetPublicUserId:
-        targetId === "" ? null : targetId,
-    };
-
-    // =========================
-    // これまでの交換履歴
-    // =========================
-
-    const savedExchanges =
-      localStorage.getItem("exchanges");
-
-    const exchanges = savedExchanges
-      ? JSON.parse(savedExchanges)
-      : [];
-
-    // =========================
-    // 新しい交換を追加
-    // =========================
-
-    exchanges.push(newExchange);
-
-    localStorage.setItem(
-      "exchanges",
-      JSON.stringify(exchanges)
-    );
+      setError("日記の提出に失敗しました。");
+      return;
+    }
 
     // =========================
     // 下書きを削除
@@ -129,10 +109,6 @@ export default function ConfirmPage() {
     <main className="min-h-screen bg-gray-50 px-6 py-10">
       <div className="mx-auto max-w-md">
 
-        {/* =========================
-            ヘッダー
-        ========================= */}
-
         <header className="mb-8">
           <h1 className="text-2xl font-bold text-gray-900">
             日記を確認
@@ -142,10 +118,6 @@ export default function ConfirmPage() {
             内容を確認して提出してください。
           </p>
         </header>
-
-        {/* =========================
-            日記
-        ========================= */}
 
         <section className="rounded-xl bg-white p-5 shadow-sm">
 
@@ -158,10 +130,6 @@ export default function ConfirmPage() {
               {diary}
             </p>
           </div>
-
-          {/* =========================
-              指定ポケット
-          ========================= */}
 
           <div className="mt-6">
 
@@ -201,10 +169,6 @@ export default function ConfirmPage() {
             )}
 
           </div>
-
-          {/* =========================
-              ボタン
-          ========================= */}
 
           <div className="mt-6 flex gap-3">
 
