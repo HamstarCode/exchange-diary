@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 // ===== Exchangeの基準時刻 =====
-// 今は20時。将来的に変更する場合はここだけ変更。
+// 将来的に変更する場合はここだけ変更。
 const EXCHANGE_START_HOUR = 20;
 
 export default function ConfirmPage() {
@@ -90,6 +90,9 @@ export default function ConfirmPage() {
       end.toISOString()
     );
 
+    // 自分のSubmissionを後で更新するため、IDを先に作成
+    const submissionId = crypto.randomUUID();
+
     // =========================
     // Supabaseに提出を保存
     // =========================
@@ -97,7 +100,7 @@ export default function ConfirmPage() {
     const { error: insertError } = await supabase
       .from("submissions")
       .insert({
-        id: crypto.randomUUID(),
+        id: submissionId,
         user_id: user.userId,
         diary: diary.trim(),
         target_public_user_id:
@@ -115,7 +118,112 @@ export default function ConfirmPage() {
       return;
     }
 
-    console.log("Submission登録成功");
+    // =========================
+    // Submission保存成功
+    // =========================
+
+    console.log("Submission保存成功！");
+
+    // =========================
+    // 今回、自分を指定している
+    // 未マッチの他人のSubmissionを検索
+    // =========================
+
+    const {
+      data: matchingSubmissions,
+      error: matchingError,
+    } = await supabase
+      .from("submissions")
+      .select("*")
+      .eq(
+        "target_public_user_id",
+        user.publicUserId
+      )
+      .neq("user_id", user.userId)
+      .is("room_id", null)
+      .gte("created_at", start.toISOString())
+      .lt("created_at", end.toISOString())
+      .order("created_at", {
+        ascending: false,
+      })
+      .limit(1);
+
+    if (matchingError) {
+      console.error(
+        "候補Submissionの検索エラー:",
+        matchingError.message
+      );
+    } else if (
+      !matchingSubmissions ||
+      matchingSubmissions.length === 0
+    ) {
+      console.log(
+        "今回のExchangeで自分を指定している人はいません。"
+      );
+    } else {
+      const candidate = matchingSubmissions[0];
+
+      console.log(
+        "相互指定成立！候補Submission:",
+        candidate
+      );
+
+      // =========================
+      // Roomを作成
+      // =========================
+
+      const roomId = crypto.randomUUID();
+
+      const { error: roomError } = await supabase
+        .from("rooms")
+        .insert({
+          id: roomId,
+          user_a_id: user.userId,
+          user_b_id: candidate.user_id,
+          started_at: start.toISOString(),
+          ended_at: end.toISOString(),
+        });
+
+      if (roomError) {
+        console.error(
+          "Room作成エラー:",
+          roomError.message
+        );
+
+        setError("Roomの作成に失敗しました。");
+        return;
+      }
+
+      // =========================
+      // 両方のSubmissionへ同じRoom IDを設定
+      // =========================
+
+      const { error: submissionUpdateError } =
+        await supabase
+          .from("submissions")
+          .update({
+            room_id: roomId,
+          })
+          .in("id", [submissionId, candidate.id]);
+
+      if (submissionUpdateError) {
+        console.error(
+          "SubmissionへのRoom紐付けエラー:",
+          submissionUpdateError.message
+        );
+
+        setError(
+          "SubmissionへのRoom紐付けに失敗しました。"
+        );
+        return;
+      }
+
+      console.log("Room作成・Submission紐付け成功！", {
+        roomId,
+        mySubmissionId: submissionId,
+        candidateSubmissionId: candidate.id,
+      });
+    }
 
     // =========================
     // 下書きを削除
@@ -145,7 +253,6 @@ export default function ConfirmPage() {
   return (
     <main className="min-h-screen bg-gray-50 px-6 py-10">
       <div className="mx-auto max-w-md">
-
         <header className="mb-8">
           <h1 className="text-2xl font-bold text-gray-900">
             日記を確認
@@ -157,7 +264,6 @@ export default function ConfirmPage() {
         </header>
 
         <section className="rounded-xl bg-white p-5 shadow-sm">
-
           {/* 日記 */}
 
           <div>
@@ -173,7 +279,6 @@ export default function ConfirmPage() {
           {/* 指定ポケット */}
 
           <div className="mt-6">
-
             <label
               htmlFor="targetPublicUserId"
               className="text-sm font-medium text-gray-700"
@@ -194,9 +299,7 @@ export default function ConfirmPage() {
               type="text"
               value={targetPublicUserId}
               onChange={(e) => {
-                setTargetPublicUserId(
-                  e.target.value
-                );
+                setTargetPublicUserId(e.target.value);
                 setError("");
               }}
               placeholder="公開IDを入力（例：ABC123）"
@@ -208,13 +311,11 @@ export default function ConfirmPage() {
                 {error}
               </p>
             )}
-
           </div>
 
           {/* ボタン */}
 
           <div className="mt-6 flex gap-3">
-
             <button
               onClick={() => router.back()}
               className="flex-1 rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-700"
@@ -229,11 +330,8 @@ export default function ConfirmPage() {
             >
               提出する
             </button>
-
           </div>
-
         </section>
-
       </div>
     </main>
   );
