@@ -5,22 +5,25 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 // ===== Exchangeの基準時刻 =====
-// 将来的に変更する場合はここだけ変更。
 const EXCHANGE_START_HOUR = 20;
+
+type Submission = {
+  id: string;
+  user_id: string;
+  room_id: string | null;
+};
 
 export default function ConfirmPage() {
   const router = useRouter();
 
   const [diary, setDiary] = useState("");
-  const [targetPublicUserId, setTargetPublicUserId] =
-    useState("");
+  const [targetPublicUserId, setTargetPublicUserId] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
 
   // =========================
   // 下書きを読み込む
   // =========================
-
   useEffect(() => {
     const saved = localStorage.getItem("draftDiary");
 
@@ -34,13 +37,10 @@ export default function ConfirmPage() {
   // =========================
   // 今のExchange期間を取得
   // =========================
-
   const getExchangeRange = () => {
     const now = new Date();
-
     const start = new Date(now);
 
-    // 基準時刻より前なら前日のExchange
     if (now.getHours() < EXCHANGE_START_HOUR) {
       start.setDate(start.getDate() - 1);
     }
@@ -50,21 +50,14 @@ export default function ConfirmPage() {
     const end = new Date(start);
     end.setDate(end.getDate() + 1);
 
-    return {
-      start,
-      end,
-    };
+    return { start, end };
   };
 
   // =========================
   // 提出
   // =========================
-
   const handleSubmit = async () => {
     if (diary.trim() === "") return;
-
-    const targetId =
-      targetPublicUserId.trim().toUpperCase();
 
     const savedUser = localStorage.getItem("user");
 
@@ -75,20 +68,25 @@ export default function ConfirmPage() {
 
     const user = JSON.parse(savedUser);
 
+    const targetId = targetPublicUserId.trim().toUpperCase();
+
     setError("");
 
     // =========================
-    // 現在のExchange期間を取得
+    // 自分自身の公開IDは指定不可
     // =========================
+    if (
+      targetId !== "" &&
+      targetId === user.publicUserId
+    ) {
+      setError("この公開IDは存在しません。");
+      return;
+    }
 
     const { start, end } = getExchangeRange();
 
-    console.log(
-      "現在のExchange:",
-      start.toISOString(),
-      "〜",
-      end.toISOString()
-    );
+    const startIso = start.toISOString();
+    const endIso = end.toISOString();
 
     // 自分のSubmissionを後で更新するため、IDを先に作成
     const submissionId = crypto.randomUUID();
@@ -96,7 +94,6 @@ export default function ConfirmPage() {
     // =========================
     // Supabaseに提出を保存
     // =========================
-
     const { error: insertError } = await supabase
       .from("submissions")
       .insert({
@@ -118,130 +115,160 @@ export default function ConfirmPage() {
       return;
     }
 
-    // =========================
-    // Submission保存成功
-    // =========================
-
-    console.log("Submission保存成功！");
+    let candidate: Submission | null = null;
 
     // =========================
-    // 今回、自分を指定している
-    // 未マッチの他人のSubmissionを検索
+    // 指定あり
+    // 自分を指定している未マッチの相手を探す
     // =========================
+    if (targetId !== "") {
+      const {
+        data,
+        error: matchingError,
+      } = await supabase
+        .from("submissions")
+        .select("id, user_id, room_id")
+        .eq(
+          "target_public_user_id",
+          user.publicUserId
+        )
+        .neq("user_id", user.userId)
+        .is("room_id", null)
+        .gte("created_at", startIso)
+        .lt("created_at", endIso)
+        .order("created_at", {
+          ascending: false,
+        })
+        .limit(1);
 
-    const {
-      data: matchingSubmissions,
-      error: matchingError,
-    } = await supabase
-      .from("submissions")
-      .select("*")
-      .eq(
-        "target_public_user_id",
-        user.publicUserId
-      )
-      .neq("user_id", user.userId)
-      .is("room_id", null)
-      .gte("created_at", start.toISOString())
-      .lt("created_at", end.toISOString())
-      .order("created_at", {
-        ascending: false,
-      })
-      .limit(1);
-
-    if (matchingError) {
-      console.error(
-        "候補Submissionの検索エラー:",
-        matchingError.message
-      );
-    } else if (
-      !matchingSubmissions ||
-      matchingSubmissions.length === 0
-    ) {
-      console.log(
-        "今回のExchangeで自分を指定している人はいません。"
-      );
-    } else {
-      const candidate = matchingSubmissions[0];
-
-      console.log(
-        "相互指定成立！候補Submission:",
-        candidate
-      );
-
-      // =========================
-      // Roomを作成
-      // =========================
-
-      const roomId = crypto.randomUUID();
-
-      const { error: roomError } = await supabase
-        .from("rooms")
-        .insert({
-          id: roomId,
-          user_a_id: user.userId,
-          user_b_id: candidate.user_id,
-          started_at: start.toISOString(),
-          ended_at: end.toISOString(),
-        });
-
-      if (roomError) {
+      if (matchingError) {
         console.error(
-          "Room作成エラー:",
-          roomError.message
-        );
-
-        setError("Roomの作成に失敗しました。");
-        return;
-      }
-
-      // =========================
-      // 両方のSubmissionへ同じRoom IDを設定
-      // =========================
-
-      const { error: submissionUpdateError } =
-        await supabase
-          .from("submissions")
-          .update({
-            room_id: roomId,
-          })
-          .in("id", [submissionId, candidate.id]);
-
-      if (submissionUpdateError) {
-        console.error(
-          "SubmissionへのRoom紐付けエラー:",
-          submissionUpdateError.message
+          "指定相手の候補検索エラー:",
+          matchingError.message
         );
 
         setError(
-          "SubmissionへのRoom紐付けに失敗しました。"
+          "交換相手の検索に失敗しました。"
         );
         return;
       }
 
-      console.log("Room作成・Submission紐付け成功！", {
-        roomId,
-        mySubmissionId: submissionId,
-        candidateSubmissionId: candidate.id,
-      });
+      candidate = data?.[0] ?? null;
     }
 
     // =========================
-    // 下書きを削除
+    // 指定なし
+    // 匿名待機列から最も古い人を探す
     // =========================
+    if (targetId === "") {
+      const {
+        data,
+        error: anonymousMatchingError,
+      } = await supabase
+        .from("submissions")
+        .select("id, user_id, room_id")
+        .is("target_public_user_id", null)
+        .is("room_id", null)
+        .neq("user_id", user.userId)
+        .gte("created_at", startIso)
+        .lt("created_at", endIso)
+        .order("created_at", {
+          ascending: true,
+        })
+        .limit(1);
+
+      if (anonymousMatchingError) {
+        console.error(
+          "匿名相手の候補検索エラー:",
+          anonymousMatchingError.message
+        );
+
+        setError(
+          "匿名の交換相手の検索に失敗しました。"
+        );
+        return;
+      }
+
+      candidate = data?.[0] ?? null;
+    }
+
+    // =========================
+    // 相手がいなければ待機
+    // =========================
+    if (candidate === null) {
+      localStorage.removeItem("draftDiary");
+      router.push("/");
+      return;
+    }
+
+    // =========================
+    // Roomを作成
+    // =========================
+    const roomId = crypto.randomUUID();
+
+    const { error: roomError } = await supabase
+      .from("rooms")
+      .insert({
+        id: roomId,
+        user_a_id: user.userId,
+        user_b_id: candidate.user_id,
+        started_at: startIso,
+        ended_at: endIso,
+      });
+
+    if (roomError) {
+      console.error(
+        "Room作成エラー:",
+        roomError.message
+      );
+
+      setError("Roomの作成に失敗しました。");
+      return;
+    }
+
+    // =========================
+    // 両方のSubmissionへ同じRoom IDを設定
+    // =========================
+    const {
+      error: submissionUpdateError,
+    } = await supabase
+      .from("submissions")
+      .update({
+        room_id: roomId,
+      })
+      .in("id", [
+        submissionId,
+        candidate.id,
+      ]);
+
+    if (submissionUpdateError) {
+      console.error(
+        "SubmissionへのRoom紐付けエラー:",
+        submissionUpdateError.message
+      );
+
+      setError(
+        "SubmissionへのRoom紐付けに失敗しました。"
+      );
+      return;
+    }
+
+    console.log(
+      "Room作成・Submission紐付け成功！",
+      {
+        roomId,
+        mySubmissionId: submissionId,
+        candidateSubmissionId: candidate.id,
+      }
+    );
 
     localStorage.removeItem("draftDiary");
-
-    // =========================
-    // ホームへ
-    // =========================
-
     router.push("/");
   };
 
   // =========================
   // 読み込み中
   // =========================
-
   if (!loaded) {
     return <p>読み込み中...</p>;
   }
@@ -249,7 +276,6 @@ export default function ConfirmPage() {
   // =========================
   // 画面
   // =========================
-
   return (
     <main className="min-h-screen bg-gray-50 px-6 py-10">
       <div className="mx-auto max-w-md">
