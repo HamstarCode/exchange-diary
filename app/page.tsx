@@ -11,37 +11,63 @@ type User = {
   publicUserId: string;
 };
 
-type Exchange = {
+type Submission = {
   id: string;
-  date: string;
-  status: "matching" | "matched";
-
-  partner: {
-    publicUserId: string | null;
-    nickname: string;
-  } | null;
-
-  myDiary: string;
-  partnerDiary: string | null;
-  myReply: string | null;
-  partnerReply: string | null;
-
-  targetPublicUserId: string | null;
+  user_id: string;
+  diary: string;
+  target_public_user_id: string | null;
+  room_id: string | null;
+  created_at: string;
 };
 
-const TEST_TODAY_DATE = "2026/08/29";
-const TEST_PREVIOUS_DATE = "2026/08/28";
+// =========================
+// Exchangeの基準時刻
+// =========================
+// 今は20時。
+// 将来的に変更する場合はここだけ変更。
+const EXCHANGE_START_HOUR = 20;
 
 export default function Home() {
   const router = useRouter();
 
   const [user, setUser] = useState<User | null>(null);
-  const [exchanges, setExchanges] = useState<Exchange[]>([]);
+  const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
+  const [matching, setMatching] = useState(false);
+
+  // =========================
+  // 今のExchange期間を取得
+  // =========================
+
+  const getExchangeRange = () => {
+    const now = new Date();
+
+    const start = new Date(now);
+
+    // 現在時刻が20時より前なら前日の20時
+    if (now.getHours() < EXCHANGE_START_HOUR) {
+      start.setDate(start.getDate() - 1);
+    }
+
+    start.setHours(EXCHANGE_START_HOUR, 0, 0, 0);
+
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+
+    return {
+      start,
+      end,
+    };
+  };
+
+  // =========================
+  // データ読み込み
+  // =========================
 
   useEffect(() => {
     //localStorage.clear();
+
     const loadData = async () => {
       const savedUser = localStorage.getItem("user");
 
@@ -53,55 +79,31 @@ export default function Home() {
       const currentUser: User = JSON.parse(savedUser);
       setUser(currentUser);
 
-      // =========================
-      // Supabaseから自分のExchangeを取得
-      // =========================
+      const { start, end } = getExchangeRange();
 
       const { data, error: fetchError } = await supabase
-        .from("exchanges")
+        .from("submissions")
         .select("*")
         .eq("user_id", currentUser.userId)
-        .order("date", { ascending: false });
+        .gte("created_at", start.toISOString())
+        .lt("created_at", end.toISOString())
+        .order("created_at", { ascending: false });
 
       if (fetchError) {
         console.error(
-          "Exchange取得エラー:",
+          "提出取得エラー:",
           fetchError.message
         );
 
-        setError("交換データの読み込みに失敗しました。");
+        setError(
+          "日記データの読み込みに失敗しました。"
+        );
+
         setLoaded(true);
         return;
       }
 
-      // =========================
-      // DBのデータを画面用に変換
-      // =========================
-
-      const convertedExchanges: Exchange[] =
-        (data ?? []).map((exchange) => ({
-          id: exchange.id,
-          date: exchange.date,
-          status: exchange.status,
-
-          partner: exchange.partner_public_user_id
-            ? {
-                publicUserId:
-                  exchange.partner_public_user_id,
-                nickname: "相手",
-              }
-            : null,
-
-          myDiary: exchange.my_diary,
-          partnerDiary: exchange.partner_diary,
-          myReply: exchange.my_reply,
-          partnerReply: exchange.partner_reply,
-
-          targetPublicUserId:
-            exchange.target_public_user_id,
-        }));
-
-      setExchanges(convertedExchanges);
+      setSubmissions(data ?? []);
       setLoaded(true);
     };
 
@@ -121,108 +123,250 @@ export default function Home() {
   }
 
   // =========================
-  // 今日のExchange
+  // 今のExchangeのSubmission
   // =========================
 
-  const todayExchange = exchanges.find(
-    (exchange) =>
-      exchange.date === TEST_TODAY_DATE
-  );
-
-  // =========================
-  // 前日のExchange
-  // =========================
-
-  const previousExchange = exchanges.find(
-    (exchange) =>
-      exchange.date === TEST_PREVIOUS_DATE
-  );
-
-  // =========================
-  // 前日の返信判定
-  // =========================
-
-  const previousMatched =
-    previousExchange?.status === "matched";
-
-  const hasPreviousPartnerDiary =
-    previousMatched &&
-    previousExchange?.partnerDiary !== null &&
-    previousExchange?.partnerDiary !== undefined;
-
-  const hasPreviousMyReply =
-    previousMatched &&
-    previousExchange?.myReply !== null &&
-    previousExchange?.myReply !== undefined;
-
-  const needsReply =
-    previousMatched &&
-    hasPreviousPartnerDiary &&
-    !hasPreviousMyReply;
-
-  // =========================
-  // 今日の日記提出済み
-  // =========================
+  const todaySubmission = submissions[0];
 
   const isTodaySubmitted =
-    todayExchange !== undefined;
+    todaySubmission !== undefined;
 
   // =========================
-  // テスト用マッチング
+  // Room生成
   // =========================
 
   const handleMatching = async () => {
-    if (!todayExchange) {
+    if (!todaySubmission) {
       return;
     }
 
-    if (todayExchange.status !== "matching") {
+    if (todaySubmission.room_id !== null) {
       return;
     }
 
-    const { data, error: updateError } =
-      await supabase
-        .from("exchanges")
-        .update({
-          status: "matched",
-          partner_public_user_id: "ABC123",
-        })
-        .eq("id", todayExchange.id)
-        .select()
-        .single();
+    if (
+      todaySubmission.target_public_user_id === null
+    ) {
+      setError("指定された相手がいません。");
+      return;
+    }
 
-    if (updateError) {
+    setMatching(true);
+    setError("");
+
+    // =========================
+    // 相手のユーザーを取得
+    // =========================
+
+    const {
+      data: partnerUser,
+      error: partnerUserError,
+    } = await supabase
+      .from("users")
+      .select("id, public_user_id")
+      .eq(
+        "public_user_id",
+        todaySubmission.target_public_user_id
+      )
+      .single();
+
+    if (partnerUserError || !partnerUser) {
       console.error(
-        "マッチング更新エラー:",
-        updateError.message
+        "相手ユーザー取得エラー:",
+        partnerUserError?.message
       );
 
-      setError("マッチングに失敗しました。");
+      setError("指定した相手が見つかりません。");
+      setMatching(false);
       return;
     }
 
-    const updatedExchange: Exchange = {
-      ...todayExchange,
-      status: "matched",
-      partner: {
-        publicUserId:
-          data.partner_public_user_id,
-        nickname: "テストユーザーA",
-      },
-    };
+    // =========================
+    // 今のExchange期間
+    // =========================
 
-    setExchanges((current) =>
-      current.map((exchange) =>
-        exchange.id === todayExchange.id
-          ? updatedExchange
-          : exchange
+    const { start, end } = getExchangeRange();
+
+    // =========================
+    // 相手のSubmissionを取得
+    // =========================
+
+    const {
+      data: partnerSubmission,
+      error: partnerSubmissionError,
+    } = await supabase
+      .from("submissions")
+      .select("*")
+      .eq("user_id", partnerUser.id)
+      .gte("created_at", start.toISOString())
+      .lt("created_at", end.toISOString())
+      .order("created_at", {
+        ascending: false,
+      })
+      .limit(1)
+      .maybeSingle();
+
+    if (partnerSubmissionError) {
+      console.error(
+        "相手Submission取得エラー:",
+        partnerSubmissionError.message
+      );
+
+      setError(
+        "相手の日記の確認に失敗しました。"
+      );
+
+      setMatching(false);
+      return;
+    }
+
+    // =========================
+    // 相手がまだ提出していない
+    // =========================
+
+    if (!partnerSubmission) {
+      setError(
+        "相手はまだこのExchangeの日記を提出していません。"
+      );
+
+      setMatching(false);
+      return;
+    }
+
+    // =========================
+    // 相手も自分を指定しているか確認
+    // =========================
+
+    if (
+      partnerSubmission.target_public_user_id !==
+      user.publicUserId
+    ) {
+      setError(
+        "相手からの指定が確認できません。"
+      );
+
+      setMatching(false);
+      return;
+    }
+
+    // =========================
+    // すでにRoomがある場合
+    // =========================
+
+    if (partnerSubmission.room_id !== null) {
+      setError("すでにRoomが存在します。");
+      setMatching(false);
+      return;
+    }
+
+    // =========================
+    // Roomを作成
+    // =========================
+
+    const roomId = crypto.randomUUID();
+
+    const { error: roomError } =
+      await supabase
+        .from("rooms")
+        .insert({
+          id: roomId,
+          user_a_id: user.userId,
+          user_b_id: partnerUser.id,
+          started_at: start.toISOString(),
+          ended_at: end.toISOString(),
+        });
+
+    if (roomError) {
+      console.error(
+        "Room作成エラー:",
+        roomError.message
+      );
+
+      setError("Roomの作成に失敗しました。");
+      setMatching(false);
+      return;
+    }
+
+    // =========================
+    // 自分のSubmissionにRoom IDを設定
+    // =========================
+
+    const { error: mySubmissionError } =
+      await supabase
+        .from("submissions")
+        .update({
+          room_id: roomId,
+        })
+        .eq("id", todaySubmission.id);
+
+    if (mySubmissionError) {
+      console.error(
+        "自分のSubmission更新エラー:",
+        mySubmissionError.message
+      );
+
+      setError(
+        "SubmissionへのRoom紐付けに失敗しました。"
+      );
+
+      setMatching(false);
+      return;
+    }
+
+    // =========================
+    // 相手のSubmissionにRoom IDを設定
+    // =========================
+
+    const {
+      error: partnerSubmissionUpdateError,
+    } = await supabase
+      .from("submissions")
+      .update({
+        room_id: roomId,
+      })
+      .eq("id", partnerSubmission.id);
+
+    if (partnerSubmissionUpdateError) {
+      console.error(
+        "相手Submission更新エラー:",
+        partnerSubmissionUpdateError.message
+      );
+
+      setError(
+        "相手のSubmissionへのRoom紐付けに失敗しました。"
+      );
+
+      setMatching(false);
+      return;
+    }
+
+    // =========================
+    // 画面上のSubmissionも更新
+    // =========================
+
+    setSubmissions((current) =>
+      current.map((submission) =>
+        submission.id === todaySubmission.id
+          ? {
+              ...submission,
+              room_id: roomId,
+            }
+          : submission
       )
     );
+
+    setMatching(false);
   };
+
+  // =========================
+  // 画面
+  // =========================
 
   return (
     <main className="min-h-screen bg-gray-50 px-6 py-10">
       <div className="mx-auto max-w-md">
+
+        {/* ヘッダー */}
 
         <header className="mb-8">
           <h1 className="text-2xl font-bold text-gray-900">
@@ -238,45 +382,35 @@ export default function Home() {
           </p>
         </header>
 
+        {/* エラー */}
+
         {error && (
           <p className="mb-4 rounded-lg bg-red-50 p-4 text-sm text-red-600">
             {error}
           </p>
         )}
 
+        {/* 今のExchangeの日記 */}
+
         <section className="rounded-xl bg-white p-5 shadow-sm">
           <h2 className="text-lg font-semibold">
-            今日の日記
+            今回の日記
           </h2>
 
-          {needsReply ? (
-            <>
-              <p className="mt-3 text-sm text-gray-500">
-                昨日の相手の日記に返信してから、
-                今日の日記を書いてください。
-              </p>
-
-              <Link
-                href={`/reply/${previousExchange!.id}`}
-                className="mt-5 block rounded-lg bg-gray-900 px-4 py-3 text-center text-sm font-medium text-white"
-              >
-                返信する
-              </Link>
-            </>
-          ) : isTodaySubmitted ? (
+          {isTodaySubmitted ? (
             <>
               <p className="mt-3 text-sm font-medium text-gray-800">
                 提出済み ✓
               </p>
 
               <p className="mt-2 text-sm text-gray-500">
-                今日の日記は提出しました。
+                今回の日記は提出しました。
               </p>
             </>
           ) : (
             <>
               <p className="mt-2 text-sm text-gray-500">
-                今日の日記を書いてください。
+                今回の日記を書いてください。
               </p>
 
               <Link
@@ -289,63 +423,51 @@ export default function Home() {
           )}
         </section>
 
+        {/* 今回の交換 */}
+
         <section className="mt-4 rounded-xl bg-white p-5 shadow-sm">
           <h2 className="text-lg font-semibold">
-            今晩の交換
+            今回の交換
           </h2>
 
-          {!todayExchange ? (
+          {!todaySubmission ? (
             <p className="mt-2 text-sm text-gray-500">
-              今日の日記を提出すると交換が始まります。
+              日記を提出すると交換が始まります。
             </p>
-          ) : todayExchange.status === "matching" ? (
+          ) : todaySubmission.room_id === null ? (
             <>
               <p className="mt-3 font-medium text-gray-800">
                 交換相手を探しています...
               </p>
 
               <p className="mt-2 text-sm text-gray-500">
-                相手が見つかるまでお待ちください。
+                相互に相手を指定するとRoomが作成されます。
               </p>
 
               <button
                 onClick={handleMatching}
-                className="mt-5 w-full rounded-lg bg-gray-900 px-4 py-3 text-sm font-medium text-white"
+                disabled={matching}
+                className="mt-5 w-full rounded-lg bg-gray-900 px-4 py-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-gray-300"
               >
-                テスト：マッチングする
+                {matching
+                  ? "確認中..."
+                  : "テスト：マッチングする"}
               </button>
             </>
           ) : (
             <>
-              <p className="mt-3 text-sm text-gray-500">
-                交換相手
+              <p className="mt-3 font-medium text-gray-800">
+                交換相手が決まりました。
               </p>
 
-              <p className="mt-1 font-medium text-gray-800">
-                {todayExchange.partner?.nickname ?? "相手"}
+              <p className="mt-2 text-sm text-gray-500">
+                Room ID：{todaySubmission.room_id}
               </p>
-
-              <p className="mt-1 text-sm text-gray-500">
-                公開ID：
-                {todayExchange.partner?.publicUserId ?? "不明"}
-              </p>
-
-              <p className="mt-4 text-sm text-gray-500">
-                状態
-              </p>
-
-              {todayExchange.partnerDiary === null ? (
-                <p className="mt-1 font-medium text-gray-800">
-                  相手の日記を待っています
-                </p>
-              ) : (
-                <p className="mt-1 font-medium text-gray-800">
-                  相手の日記が届きました
-                </p>
-              )}
             </>
           )}
         </section>
+
+        {/* 日記一覧 */}
 
         <Link
           href="/diaries"

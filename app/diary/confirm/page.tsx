@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-// ===== テスト用の日付 =====
-const TEST_DATE = "2026/08/29";
+// ===== Exchangeの基準時刻 =====
+// 今は20時。将来的に変更する場合はここだけ変更。
+const EXCHANGE_START_HOUR = 20;
 
 export default function ConfirmPage() {
   const router = useRouter();
@@ -31,6 +32,31 @@ export default function ConfirmPage() {
   }, []);
 
   // =========================
+  // 今のExchange期間を取得
+  // =========================
+
+  const getExchangeRange = () => {
+    const now = new Date();
+
+    const start = new Date(now);
+
+    // 基準時刻より前なら前日のExchange
+    if (now.getHours() < EXCHANGE_START_HOUR) {
+      start.setDate(start.getDate() - 1);
+    }
+
+    start.setHours(EXCHANGE_START_HOUR, 0, 0, 0);
+
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+
+    return {
+      start,
+      end,
+    };
+  };
+
+  // =========================
   // 提出
   // =========================
 
@@ -52,26 +78,31 @@ export default function ConfirmPage() {
     setError("");
 
     // =========================
-    // SupabaseにExchangeを保存
+    // 現在のExchange期間を取得
+    // =========================
+
+    const { start, end } = getExchangeRange();
+
+    console.log(
+      "現在のExchange:",
+      start.toISOString(),
+      "〜",
+      end.toISOString()
+    );
+
+    // =========================
+    // Supabaseに提出を保存
     // =========================
 
     const { error: insertError } = await supabase
-      .from("exchanges")
+      .from("submissions")
       .insert({
         id: crypto.randomUUID(),
         user_id: user.userId,
-        date: TEST_DATE,
-        status: "matching",
-
+        diary: diary.trim(),
         target_public_user_id:
           targetId === "" ? null : targetId,
-
-        partner_public_user_id: null,
-
-        my_diary: diary.trim(),
-        partner_diary: null,
-        my_reply: null,
-        partner_reply: null,
+        room_id: null,
       });
 
     if (insertError) {
@@ -83,6 +114,8 @@ export default function ConfirmPage() {
       setError("日記の提出に失敗しました。");
       return;
     }
+
+    console.log("Submission登録成功");
 
     // =========================
     // 下書きを削除
@@ -105,6 +138,10 @@ export default function ConfirmPage() {
     return <p>読み込み中...</p>;
   }
 
+  // =========================
+  // 画面
+  // =========================
+
   return (
     <main className="min-h-screen bg-gray-50 px-6 py-10">
       <div className="mx-auto max-w-md">
@@ -121,6 +158,8 @@ export default function ConfirmPage() {
 
         <section className="rounded-xl bg-white p-5 shadow-sm">
 
+          {/* 日記 */}
+
           <div>
             <p className="text-sm font-medium text-gray-500">
               日記
@@ -130,6 +169,8 @@ export default function ConfirmPage() {
               {diary}
             </p>
           </div>
+
+          {/* 指定ポケット */}
 
           <div className="mt-6">
 
@@ -169,6 +210,8 @@ export default function ConfirmPage() {
             )}
 
           </div>
+
+          {/* ボタン */}
 
           <div className="mt-6 flex gap-3">
 

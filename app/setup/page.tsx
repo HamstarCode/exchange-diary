@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 export default function SetupPage() {
   const [nickname, setNickname] = useState("");
   const [error, setError] = useState("");
+  
 
   const handleStart = async () => {
     if (nickname.trim() === "") return;
