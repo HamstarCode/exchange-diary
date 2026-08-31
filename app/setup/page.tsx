@@ -6,11 +6,12 @@ import { supabase } from "@/lib/supabase";
 export default function SetupPage() {
   const [nickname, setNickname] = useState("");
   const [error, setError] = useState("");
-  
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleStart = async () => {
-    if (nickname.trim() === "") return;
+    if (nickname.trim() === "" || isSubmitting) return;
 
+    setIsSubmitting(true);
     setError("");
 
     const user = {
@@ -34,10 +35,11 @@ export default function SetupPage() {
     if (insertError) {
       console.error("ユーザー登録エラー:", insertError.message);
       setError("ユーザー登録に失敗しました。");
+      setIsSubmitting(false);
       return;
     }
 
-    // 今まで通りlocalStorageにも保存
+    // localStorageにも保存
     localStorage.setItem("user", JSON.stringify(user));
 
     window.location.href = "/";
@@ -69,6 +71,7 @@ export default function SetupPage() {
             onChange={(e) => setNickname(e.target.value)}
             placeholder="ニックネームを入力"
             maxLength={20}
+            disabled={isSubmitting}
             className="mt-2 w-full rounded-lg border border-gray-200 px-4 py-3 text-sm outline-none focus:border-gray-400"
           />
 
@@ -80,10 +83,10 @@ export default function SetupPage() {
 
           <button
             onClick={handleStart}
-            disabled={nickname.trim() === ""}
+            disabled={nickname.trim() === "" || isSubmitting}
             className="mt-5 w-full rounded-lg bg-gray-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-gray-700 disabled:cursor-not-allowed disabled:bg-gray-300"
           >
-            はじめる
+            {isSubmitting ? "登録中..." : "はじめる"}
           </button>
         </section>
       </div>

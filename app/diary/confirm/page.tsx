@@ -20,6 +20,7 @@ export default function ConfirmPage() {
   const [targetPublicUserId, setTargetPublicUserId] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // =========================
   // 下書きを読み込む
@@ -57,20 +58,23 @@ export default function ConfirmPage() {
   // 提出
   // =========================
   const handleSubmit = async () => {
-    if (diary.trim() === "") return;
+    // 送信中なら何もしない
+    if (diary.trim() === "" || isSubmitting) return;
+
+    setIsSubmitting(true);
+    setError("");
 
     const savedUser = localStorage.getItem("user");
 
     if (savedUser === null) {
       setError("ユーザー情報が見つかりません。");
+      setIsSubmitting(false);
       return;
     }
 
     const user = JSON.parse(savedUser);
 
     const targetId = targetPublicUserId.trim().toUpperCase();
-
-    setError("");
 
     // =========================
     // 自分自身の公開IDは指定不可
@@ -80,6 +84,7 @@ export default function ConfirmPage() {
       targetId === user.publicUserId
     ) {
       setError("この公開IDは存在しません。");
+      setIsSubmitting(false);
       return;
     }
 
@@ -112,6 +117,7 @@ export default function ConfirmPage() {
       );
 
       setError("日記の提出に失敗しました。");
+      setIsSubmitting(false);
       return;
     }
 
@@ -150,6 +156,7 @@ export default function ConfirmPage() {
         setError(
           "交換相手の検索に失敗しました。"
         );
+        setIsSubmitting(false);
         return;
       }
 
@@ -186,6 +193,7 @@ export default function ConfirmPage() {
         setError(
           "匿名の交換相手の検索に失敗しました。"
         );
+        setIsSubmitting(false);
         return;
       }
 
@@ -223,6 +231,7 @@ export default function ConfirmPage() {
       );
 
       setError("Roomの作成に失敗しました。");
+      setIsSubmitting(false);
       return;
     }
 
@@ -250,6 +259,7 @@ export default function ConfirmPage() {
       setError(
         "SubmissionへのRoom紐付けに失敗しました。"
       );
+      setIsSubmitting(false);
       return;
     }
 
@@ -291,7 +301,6 @@ export default function ConfirmPage() {
 
         <section className="rounded-xl bg-white p-5 shadow-sm">
           {/* 日記 */}
-
           <div>
             <p className="text-sm font-medium text-gray-500">
               日記
@@ -303,7 +312,6 @@ export default function ConfirmPage() {
           </div>
 
           {/* 指定ポケット */}
-
           <div className="mt-6">
             <label
               htmlFor="targetPublicUserId"
@@ -329,6 +337,7 @@ export default function ConfirmPage() {
                 setError("");
               }}
               placeholder="公開IDを入力（例：ABC123）"
+              disabled={isSubmitting}
               className="mt-3 w-full rounded-lg border border-gray-200 px-4 py-3 text-sm outline-none focus:border-gray-400"
             />
 
@@ -340,21 +349,23 @@ export default function ConfirmPage() {
           </div>
 
           {/* ボタン */}
-
           <div className="mt-6 flex gap-3">
             <button
               onClick={() => router.back()}
-              className="flex-1 rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-700"
+              disabled={isSubmitting}
+              className="flex-1 rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               戻る
             </button>
 
             <button
               onClick={handleSubmit}
-              disabled={diary.trim() === ""}
+              disabled={
+                diary.trim() === "" || isSubmitting
+              }
               className="flex-1 rounded-lg bg-gray-900 px-4 py-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-gray-300"
             >
-              提出する
+              {isSubmitting ? "提出中..." : "提出する"}
             </button>
           </div>
         </section>
