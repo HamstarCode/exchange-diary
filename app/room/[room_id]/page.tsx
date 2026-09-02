@@ -70,6 +70,7 @@ export default function RoomPage() {
   const [error, setError] = useState("");
 
   const [isExpired, setIsExpired] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
     const loadRoom = async () => {
@@ -112,13 +113,22 @@ export default function RoomPage() {
       setRoom(roomData);
 
       // =========================
-      // Exchange終了判定
+      // 時間判定
       // =========================
 
       const now = new Date();
-      const end = new Date(roomData.ended_at);
 
-      setIsExpired(now >= end);
+      const startedAt = new Date(roomData.started_at);
+      const endedAt = new Date(roomData.ended_at);
+
+      // Exchange開始日の翌朝6:00
+      const openAt = new Date(startedAt);
+
+      openAt.setDate(openAt.getDate() + 1);
+      openAt.setHours(6, 0, 0, 0);
+
+      setIsOpen(now >= openAt);
+      setIsExpired(now >= endedAt);
 
       // =========================
       // このRoomの日記を取得
@@ -215,10 +225,27 @@ export default function RoomPage() {
     }
 
     // =========================
-    // 返信期限チェック
+    // 閲覧開始時間チェック
     // =========================
 
     const now = new Date();
+
+    const startedAt = new Date(room.started_at);
+    const openAt = new Date(startedAt);
+
+    openAt.setDate(openAt.getDate() + 1);
+    openAt.setHours(6, 0, 0, 0);
+
+    if (now < openAt) {
+      setIsOpen(false);
+      setError("このExchangeは朝6時から開放されます。");
+      return;
+    }
+
+    // =========================
+    // 返信期限チェック
+    // =========================
+
     const end = new Date(room.ended_at);
 
     if (now >= end) {
@@ -315,27 +342,42 @@ export default function RoomPage() {
   return (
     <main className="min-h-screen bg-gray-50 px-6 py-10">
       <div className="mx-auto max-w-md">
-              {/* ホームに戻る */}
-      <button
-        type="button"
-        onClick={() => router.push("/")}
-        className="text-sm text-gray-500"
-      >
-        ← ホームに戻る
-      </button>
 
-        <h1 className="text-2xl font-bold text-gray-900">
+        {/* ホームに戻る */}
+
+        <button
+          type="button"
+          onClick={() => router.push("/")}
+          className="text-sm text-gray-500"
+        >
+          ← ホームに戻る
+        </button>
+
+        <h1 className="mt-4 text-2xl font-bold text-gray-900">
           交換日記
         </h1>
 
-        {/* 相手の日記 */}
+        {/* =========================
+            相手の日記
+        ========================= */}
 
         <section className="mt-6 rounded-xl bg-white p-5 shadow-sm">
+
           <p className="text-sm font-medium text-gray-500">
             相手の日記
           </p>
 
-          {partnerSubmission ? (
+          {!isOpen ? (
+            <>
+              <p className="mt-3 font-medium text-gray-800">
+                まだ開放されていません。
+              </p>
+
+              <p className="mt-2 text-sm text-gray-500">
+                朝6時になると相手の日記を閲覧できます。
+              </p>
+            </>
+          ) : partnerSubmission ? (
             <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-gray-800">
               {partnerSubmission.diary}
             </p>
@@ -344,16 +386,24 @@ export default function RoomPage() {
               相手の日記がありません。
             </p>
           )}
+
         </section>
 
-        {/* 返信 */}
+        {/* =========================
+            返信
+        ========================= */}
 
         <section className="mt-4 rounded-xl bg-white p-5 shadow-sm">
+
           <p className="text-sm font-medium text-gray-500">
             返信
           </p>
 
-          {myReply ? (
+          {!isOpen ? (
+            <p className="mt-3 text-sm text-gray-500">
+              朝6時から返信できます。
+            </p>
+          ) : myReply ? (
             <>
               <p className="mt-3 text-sm font-medium text-gray-800">
                 返信済み ✓
@@ -461,7 +511,16 @@ export default function RoomPage() {
               </button>
             </>
           )}
+
         </section>
+
+        {/* エラー */}
+
+        {error && (
+          <p className="mt-4 text-sm text-red-500">
+            {error}
+          </p>
+        )}
 
       </div>
     </main>

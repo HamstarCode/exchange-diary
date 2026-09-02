@@ -7,6 +7,37 @@ import { supabase } from "@/lib/supabase";
 // ===== Exchangeの基準時刻 =====
 const EXCHANGE_START_HOUR = 20;
 
+// ===== 性格タイプの相性 =====
+// 自分のタイプ → 相性の良い相手のタイプ
+//
+// バランス型は personality_type = NULL として扱うため、
+// ここには入れない。
+const MATCHING_TYPE: Record<string, string> = {
+  船長タイプ: "応援団タイプ",
+  応援団タイプ: "船長タイプ",
+
+  大黒柱タイプ: "聞き役タイプ",
+  聞き役タイプ: "大黒柱タイプ",
+
+  仕掛け人タイプ: "旅人タイプ",
+  旅人タイプ: "仕掛け人タイプ",
+
+  軍師タイプ: "職人タイプ",
+  職人タイプ: "軍師タイプ",
+
+  実況者タイプ: "実況者タイプ",
+  観察者タイプ: "観察者タイプ",
+
+  太陽タイプ: "盛り上げ役タイプ",
+  盛り上げ役タイプ: "太陽タイプ",
+
+  癒し系タイプ: "社交家タイプ",
+  社交家タイプ: "癒し系タイプ",
+
+  ムードメーカー: "ムードメーカー",
+  包容力タイプ: "包容力タイプ",
+};
+
 type Submission = {
   id: string;
   user_id: string;
@@ -17,7 +48,8 @@ export default function ConfirmPage() {
   const router = useRouter();
 
   const [diary, setDiary] = useState("");
-  const [targetPublicUserId, setTargetPublicUserId] = useState("");
+  const [targetPublicUserId, setTargetPublicUserId] =
+    useState("");
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -58,12 +90,14 @@ export default function ConfirmPage() {
   // 提出
   // =========================
   const handleSubmit = async () => {
-    // 送信中なら何もしない
     if (diary.trim() === "" || isSubmitting) return;
 
     setIsSubmitting(true);
     setError("");
 
+    // =========================
+    // ローカルユーザー取得
+    // =========================
     const savedUser = localStorage.getItem("user");
 
     if (savedUser === null) {
@@ -74,11 +108,14 @@ export default function ConfirmPage() {
 
     const user = JSON.parse(savedUser);
 
-    const targetId = targetPublicUserId.trim().toUpperCase();
+    // =========================
+    // 指定ポケット
+    // =========================
+    const targetId = targetPublicUserId
+      .trim()
+      .toUpperCase();
 
-    // =========================
-    // 自分自身の公開IDは指定不可
-    // =========================
+    // 自分自身は指定できない
     if (
       targetId !== "" &&
       targetId === user.publicUserId
@@ -88,17 +125,47 @@ export default function ConfirmPage() {
       return;
     }
 
+    // =========================
+    // Exchange期間
+    // =========================
     const { start, end } = getExchangeRange();
 
     const startIso = start.toISOString();
     const endIso = end.toISOString();
 
-    // 自分のSubmissionを後で更新するため、IDを先に作成
-    const submissionId = crypto.randomUUID();
+    // =========================
+    // 自分の性格タイプを取得
+    // =========================
+    const {
+      data: userData,
+      error: userError,
+    } = await supabase
+      .from("users")
+      .select("personality_type")
+      .eq("id", user.userId)
+      .single();
+
+    if (userError) {
+      console.error(
+        "ユーザー情報取得エラー:",
+        userError.message
+      );
+
+      setError(
+        "ユーザー情報の取得に失敗しました。"
+      );
+      setIsSubmitting(false);
+      return;
+    }
+
+    const personalityType =
+      userData.personality_type;
 
     // =========================
-    // Supabaseに提出を保存
+    // Submissionを作成
     // =========================
+    const submissionId = crypto.randomUUID();
+
     const { error: insertError } = await supabase
       .from("submissions")
       .insert({
@@ -123,10 +190,12 @@ export default function ConfirmPage() {
 
     let candidate: Submission | null = null;
 
-    // =========================
+    // ==================================================
     // 指定あり
-    // 自分を指定している未マッチの相手を探す
-    // =========================
+    // ==================================================
+    //
+    // 相手が自分の公開IDを指定している場合だけマッチ
+    //
     if (targetId !== "") {
       const {
         data,
@@ -163,46 +232,142 @@ export default function ConfirmPage() {
       candidate = data?.[0] ?? null;
     }
 
-    // =========================
+    // ==================================================
     // 指定なし
-    // 匿名待機列から最も古い人を探す
-    // =========================
+    // ==================================================
+    //
+    // 自分のpersonality_type
+    //        ↓
+    // MATCHING_TYPE
+    //        ↓
+    // 相性の良いpersonality_type
+    //        ↓
+    // usersから該当ユーザーを探す
+    //        ↓
+    // submissionsから未マッチの日記を探す
+    //
     if (targetId === "") {
-      const {
-        data,
-        error: anonymousMatchingError,
-      } = await supabase
-        .from("submissions")
-        .select("id, user_id, room_id")
-        .is("target_public_user_id", null)
-        .is("room_id", null)
-        .neq("user_id", user.userId)
-        .gte("created_at", startIso)
-        .lt("created_at", endIso)
-        .order("created_at", {
-          ascending: true,
-        })
-        .limit(1);
+      // =========================
+      // 相手に求めるタイプを決定
+      // =========================
+      //
+      // 自分がNULL
+      // → NULL同士
+      //
+      // 自分が通常タイプ
+      // → MAPから相性の良いタイプを取得
+      //
+      const targetType =
+        personalityType === null
+          ? null
+          : MATCHING_TYPE[personalityType] ?? null;
 
-      if (anonymousMatchingError) {
+      // =========================
+      // ① usersから候補者を探す
+      // =========================
+      let usersQuery = supabase
+        .from("users")
+        .select("id");
+
+      if (targetType === null) {
+        // バランス型 / type未設定
+        // → NULL同士
+        usersQuery = usersQuery.is(
+          "personality_type",
+          null
+        );
+      } else {
+        // 相性の良いタイプを探す
+        usersQuery = usersQuery.eq(
+          "personality_type",
+          targetType
+        );
+      }
+
+      const {
+        data: matchedUsers,
+        error: usersError,
+      } = await usersQuery;
+
+      if (usersError) {
         console.error(
-          "匿名相手の候補検索エラー:",
-          anonymousMatchingError.message
+          "性格タイプのユーザー検索エラー:",
+          usersError.message
         );
 
         setError(
-          "匿名の交換相手の検索に失敗しました。"
+          "性格タイプによる交換相手の検索に失敗しました。"
         );
         setIsSubmitting(false);
         return;
       }
 
-      candidate = data?.[0] ?? null;
+      // =========================
+      // 候補ユーザーのID一覧
+      // =========================
+      const candidateUserIds =
+        matchedUsers
+          ?.map((matchedUser) => matchedUser.id)
+          .filter(
+            (id) => id !== user.userId
+          ) ?? [];
+
+      // 候補者がいない場合
+      if (candidateUserIds.length > 0) {
+        // =========================
+        // ② Submissionを探す
+        // =========================
+        //
+        // ・指定なし
+        // ・まだRoomがない
+        // ・今のExchange期間
+        // ・候補ユーザー
+        //
+        const {
+          data,
+          error: submissionMatchingError,
+        } = await supabase
+          .from("submissions")
+          .select("id, user_id, room_id")
+          .in(
+            "user_id",
+            candidateUserIds
+          )
+          .is(
+            "target_public_user_id",
+            null
+          )
+          .is("room_id", null)
+          .gte("created_at", startIso)
+          .lt("created_at", endIso)
+          .order("created_at", {
+            ascending: true,
+          })
+          .limit(1);
+
+        if (submissionMatchingError) {
+          console.error(
+            "性格タイプによるSubmission検索エラー:",
+            submissionMatchingError.message
+          );
+
+          setError(
+            "交換相手の検索に失敗しました。"
+          );
+          setIsSubmitting(false);
+          return;
+        }
+
+        candidate = data?.[0] ?? null;
+      }
     }
 
-    // =========================
-    // 相手がいなければ待機
-    // =========================
+    // ==================================================
+    // 相手が見つからなかった
+    // ==================================================
+    //
+    // Submissionは残して待機
+    //
     if (candidate === null) {
       localStorage.removeItem("draftDiary");
       router.push("/");
@@ -210,7 +375,7 @@ export default function ConfirmPage() {
     }
 
     // =========================
-    // Roomを作成
+    // Room作成
     // =========================
     const roomId = crypto.randomUUID();
 
@@ -236,7 +401,7 @@ export default function ConfirmPage() {
     }
 
     // =========================
-    // 両方のSubmissionへ同じRoom IDを設定
+    // SubmissionにRoomを紐付け
     // =========================
     const {
       error: submissionUpdateError,
@@ -272,6 +437,9 @@ export default function ConfirmPage() {
       }
     );
 
+    // =========================
+    // 完了
+    // =========================
     localStorage.removeItem("draftDiary");
     router.push("/");
   };
@@ -325,7 +493,7 @@ export default function ConfirmPage() {
               相手の公開IDを入力してください。
               <br />
               空欄のままだと、
-              匿名の相手とマッチングします。
+              性格タイプをもとにマッチングします。
             </p>
 
             <input
@@ -333,7 +501,9 @@ export default function ConfirmPage() {
               type="text"
               value={targetPublicUserId}
               onChange={(e) => {
-                setTargetPublicUserId(e.target.value);
+                setTargetPublicUserId(
+                  e.target.value
+                );
                 setError("");
               }}
               placeholder="公開IDを入力（例：ABC123）"
@@ -361,11 +531,14 @@ export default function ConfirmPage() {
             <button
               onClick={handleSubmit}
               disabled={
-                diary.trim() === "" || isSubmitting
+                diary.trim() === "" ||
+                isSubmitting
               }
               className="flex-1 rounded-lg bg-gray-900 px-4 py-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-gray-300"
             >
-              {isSubmitting ? "提出中..." : "提出する"}
+              {isSubmitting
+                ? "提出中..."
+                : "提出する"}
             </button>
           </div>
         </section>
