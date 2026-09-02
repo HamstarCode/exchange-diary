@@ -30,6 +30,16 @@ type Reply = {
   created_at: string;
 };
 
+type PartnerUser = {
+  nickname: string;
+  public_user_id: string;
+};
+
+type Bookmark = {
+  publicUserId: string;
+  nickname: string;
+};
+
 const REACTIONS = [
   {
     emoji: "👀",
@@ -59,11 +69,18 @@ export default function RoomPage() {
   const [partnerSubmission, setPartnerSubmission] =
     useState<Submission | null>(null);
 
+  const [partnerUser, setPartnerUser] =
+    useState<PartnerUser | null>(null);
+
+  const [isBookmarked, setIsBookmarked] =
+    useState(false);
+
   const [reply, setReply] = useState("");
   const [selectedReaction, setSelectedReaction] =
     useState<string | null>(null);
 
-  const [myReply, setMyReply] = useState<Reply | null>(null);
+  const [myReply, setMyReply] =
+    useState<Reply | null>(null);
 
   const [loaded, setLoaded] = useState(false);
   const [sending, setSending] = useState(false);
@@ -92,12 +109,14 @@ export default function RoomPage() {
       // Room取得
       // =========================
 
-      const { data: roomData, error: roomError } =
-        await supabase
-          .from("rooms")
-          .select("*")
-          .eq("id", roomId)
-          .single();
+      const {
+        data: roomData,
+        error: roomError,
+      } = await supabase
+        .from("rooms")
+        .select("*")
+        .eq("id", roomId)
+        .single();
 
       if (roomError) {
         console.error(
@@ -169,6 +188,56 @@ export default function RoomPage() {
       setPartnerSubmission(partnerDiary);
 
       // =========================
+      // 相手のユーザー情報を取得
+      // =========================
+
+      if (partnerDiary) {
+        const {
+          data: partnerUserData,
+          error: partnerUserError,
+        } = await supabase
+          .from("users")
+          .select("nickname, public_user_id")
+          .eq("id", partnerDiary.user_id)
+          .single();
+
+        if (partnerUserError) {
+          console.error(
+            "相手ユーザー取得エラー:",
+            partnerUserError.message
+          );
+
+          setError(
+            "相手のユーザー情報の取得に失敗しました。"
+          );
+          setLoaded(true);
+          return;
+        }
+
+        setPartnerUser(partnerUserData);
+
+        // =========================
+        // ブックマーク状態を確認
+        // =========================
+
+        const savedBookmarks =
+          localStorage.getItem("bookmarks");
+
+        if (savedBookmarks !== null) {
+          const bookmarks: Bookmark[] =
+            JSON.parse(savedBookmarks);
+
+          const bookmarked = bookmarks.some(
+            (bookmark) =>
+              bookmark.publicUserId ===
+              partnerUserData.public_user_id
+          );
+
+          setIsBookmarked(bookmarked);
+        }
+      }
+
+      // =========================
       // 自分の返信を取得
       // =========================
 
@@ -200,6 +269,71 @@ export default function RoomPage() {
 
     loadRoom();
   }, [roomId]);
+
+  // =========================
+  // ブックマーク追加・解除
+  // =========================
+
+  const handleBookmark = () => {
+    if (!partnerUser) {
+      return;
+    }
+
+    const savedBookmarks =
+      localStorage.getItem("bookmarks");
+
+    const bookmarks: Bookmark[] =
+      savedBookmarks !== null
+        ? JSON.parse(savedBookmarks)
+        : [];
+
+    const exists = bookmarks.some(
+      (bookmark) =>
+        bookmark.publicUserId ===
+        partnerUser.public_user_id
+    );
+
+    if (exists) {
+      // =========================
+      // ブックマーク解除
+      // =========================
+
+      const updatedBookmarks = bookmarks.filter(
+        (bookmark) =>
+          bookmark.publicUserId !==
+          partnerUser.public_user_id
+      );
+
+      localStorage.setItem(
+        "bookmarks",
+        JSON.stringify(updatedBookmarks)
+      );
+
+      setIsBookmarked(false);
+    } else {
+      // =========================
+      // ブックマーク追加
+      // =========================
+
+      const newBookmark: Bookmark = {
+        publicUserId:
+          partnerUser.public_user_id,
+        nickname: partnerUser.nickname,
+      };
+
+      const updatedBookmarks = [
+        ...bookmarks,
+        newBookmark,
+      ];
+
+      localStorage.setItem(
+        "bookmarks",
+        JSON.stringify(updatedBookmarks)
+      );
+
+      setIsBookmarked(true);
+    }
+  };
 
   // =========================
   // 返信する
@@ -238,7 +372,9 @@ export default function RoomPage() {
 
     if (now < openAt) {
       setIsOpen(false);
-      setError("このExchangeは朝6時から開放されます。");
+      setError(
+        "このExchangeは朝6時から開放されます。"
+      );
       return;
     }
 
@@ -274,21 +410,23 @@ export default function RoomPage() {
     // 返信保存
     // =========================
 
-    const { data: replyData, error: replyError } =
-      await supabase
-        .from("replies")
-        .insert({
-          id: crypto.randomUUID(),
-          room_id: roomId,
-          user_id: currentUser.userId,
-          content:
-            reply.trim() === ""
-              ? null
-              : reply.trim(),
-          reaction: selectedReaction,
-        })
-        .select()
-        .single();
+    const {
+      data: replyData,
+      error: replyError,
+    } = await supabase
+      .from("replies")
+      .insert({
+        id: crypto.randomUUID(),
+        room_id: roomId,
+        user_id: currentUser.userId,
+        content:
+          reply.trim() === ""
+            ? null
+            : reply.trim(),
+        reaction: selectedReaction,
+      })
+      .select()
+      .single();
 
     if (replyError) {
       console.error(
@@ -366,6 +504,33 @@ export default function RoomPage() {
           <p className="text-sm font-medium text-gray-500">
             相手の日記
           </p>
+
+          {/* 相手情報 */}
+
+          {partnerUser && (
+            <div className="mt-2 flex items-center gap-2">
+              <span className="text-sm font-medium text-gray-800">
+                {partnerUser.nickname}
+              </span>
+
+              <span className="text-xs text-gray-400">
+                {partnerUser.public_user_id}
+              </span>
+
+              <button
+                type="button"
+                onClick={handleBookmark}
+                className="text-lg leading-none"
+                aria-label={
+                  isBookmarked
+                    ? "ブックマークを解除"
+                    : "ブックマークする"
+                }
+              >
+                {isBookmarked ? "★" : "☆"}
+              </button>
+            </div>
+          )}
 
           {!isOpen ? (
             <>
@@ -446,7 +611,8 @@ export default function RoomPage() {
               <div className="mt-3 grid grid-cols-2 gap-3">
                 {REACTIONS.map((reaction) => {
                   const isSelected =
-                    selectedReaction === reaction.emoji;
+                    selectedReaction ===
+                    reaction.emoji;
 
                   return (
                     <button
@@ -504,10 +670,14 @@ export default function RoomPage() {
 
               <button
                 onClick={handleReply}
-                disabled={sending || !canSubmit}
+                disabled={
+                  sending || !canSubmit
+                }
                 className="mt-4 w-full rounded-lg bg-gray-900 px-4 py-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-gray-300"
               >
-                {sending ? "送信中..." : "返信する"}
+                {sending
+                  ? "送信中..."
+                  : "返信する"}
               </button>
             </>
           )}
