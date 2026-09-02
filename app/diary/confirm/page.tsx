@@ -7,6 +7,11 @@ import { supabase } from "@/lib/supabase";
 // ===== Exchangeの基準時刻 =====
 const EXCHANGE_START_HOUR = 20;
 
+// ===== 日記の提出締切時刻 =====
+// 今は朝5時。
+// 将来的に変更する場合はここだけ変更。
+const EXCHANGE_SUBMIT_END_HOUR = 5;
+
 // ===== 性格タイプの相性 =====
 // 自分のタイプ → 相性の良い相手のタイプ
 //
@@ -92,6 +97,25 @@ export default function ConfirmPage() {
   const handleSubmit = async () => {
     if (diary.trim() === "" || isSubmitting) return;
 
+    // =========================
+    // 提出可能時間チェック
+    // =========================
+    const { start } = getExchangeRange();
+
+    const submitEndAt = new Date(start);
+    submitEndAt.setDate(submitEndAt.getDate() + 1);
+    submitEndAt.setHours(
+      EXCHANGE_SUBMIT_END_HOUR,
+      0,
+      0,
+      0
+    );
+
+    if (new Date() >= submitEndAt) {
+      setError("日記の提出受付は終了しました。");
+      return;
+    }
+
     setIsSubmitting(true);
     setError("");
 
@@ -128,9 +152,10 @@ export default function ConfirmPage() {
     // =========================
     // Exchange期間
     // =========================
-    const { start, end } = getExchangeRange();
+    const { start: exchangeStart, end } =
+      getExchangeRange();
 
-    const startIso = start.toISOString();
+    const startIso = exchangeStart.toISOString();
     const endIso = end.toISOString();
 
     // =========================
@@ -235,28 +260,7 @@ export default function ConfirmPage() {
     // ==================================================
     // 指定なし
     // ==================================================
-    //
-    // 自分のpersonality_type
-    //        ↓
-    // MATCHING_TYPE
-    //        ↓
-    // 相性の良いpersonality_type
-    //        ↓
-    // usersから該当ユーザーを探す
-    //        ↓
-    // submissionsから未マッチの日記を探す
-    //
     if (targetId === "") {
-      // =========================
-      // 相手に求めるタイプを決定
-      // =========================
-      //
-      // 自分がNULL
-      // → NULL同士
-      //
-      // 自分が通常タイプ
-      // → MAPから相性の良いタイプを取得
-      //
       const targetType =
         personalityType === null
           ? null
@@ -270,14 +274,11 @@ export default function ConfirmPage() {
         .select("id");
 
       if (targetType === null) {
-        // バランス型 / type未設定
-        // → NULL同士
         usersQuery = usersQuery.is(
           "personality_type",
           null
         );
       } else {
-        // 相性の良いタイプを探す
         usersQuery = usersQuery.eq(
           "personality_type",
           targetType
@@ -312,17 +313,10 @@ export default function ConfirmPage() {
             (id) => id !== user.userId
           ) ?? [];
 
-      // 候補者がいない場合
+      // =========================
+      // 候補Submissionを探す
+      // =========================
       if (candidateUserIds.length > 0) {
-        // =========================
-        // ② Submissionを探す
-        // =========================
-        //
-        // ・指定なし
-        // ・まだRoomがない
-        // ・今のExchange期間
-        // ・候補ユーザー
-        //
         const {
           data,
           error: submissionMatchingError,
@@ -365,9 +359,6 @@ export default function ConfirmPage() {
     // ==================================================
     // 相手が見つからなかった
     // ==================================================
-    //
-    // Submissionは残して待機
-    //
     if (candidate === null) {
       localStorage.removeItem("draftDiary");
       router.push("/");
@@ -452,6 +443,25 @@ export default function ConfirmPage() {
   }
 
   // =========================
+  // 現在の提出可能時間
+  // =========================
+  const { start } = getExchangeRange();
+
+  const submitEndAt = new Date(start);
+  submitEndAt.setDate(
+    submitEndAt.getDate() + 1
+  );
+  submitEndAt.setHours(
+    EXCHANGE_SUBMIT_END_HOUR,
+    0,
+    0,
+    0
+  );
+
+  const isSubmitOpen =
+    new Date() < submitEndAt;
+
+  // =========================
   // 画面
   // =========================
   return (
@@ -507,8 +517,10 @@ export default function ConfirmPage() {
                 setError("");
               }}
               placeholder="公開IDを入力（例：ABC123）"
-              disabled={isSubmitting}
-              className="mt-3 w-full rounded-lg border border-gray-200 px-4 py-3 text-sm outline-none focus:border-gray-400"
+              disabled={
+                isSubmitting || !isSubmitOpen
+              }
+              className="mt-3 w-full rounded-lg border border-gray-200 px-4 py-3 text-sm outline-none focus:border-gray-400 disabled:bg-gray-100"
             />
 
             {error && (
@@ -532,13 +544,16 @@ export default function ConfirmPage() {
               onClick={handleSubmit}
               disabled={
                 diary.trim() === "" ||
-                isSubmitting
+                isSubmitting ||
+                !isSubmitOpen
               }
               className="flex-1 rounded-lg bg-gray-900 px-4 py-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-gray-300"
             >
               {isSubmitting
                 ? "提出中..."
-                : "提出する"}
+                : isSubmitOpen
+                  ? "提出する"
+                  : "提出受付終了"}
             </button>
           </div>
         </section>

@@ -28,6 +28,13 @@ type Submission = {
 const EXCHANGE_START_HOUR = 20;
 
 // =========================
+// 日記の提出締切時刻
+// =========================
+// 今は朝5時。
+// 将来的に変更する場合はここだけ変更。
+const EXCHANGE_SUBMIT_END_HOUR = 5;
+
+// =========================
 // 日記の公開時刻
 // =========================
 // 今は朝6時。
@@ -167,12 +174,24 @@ export default function Home() {
   // =========================
   const { start } = getExchangeRange();
 
+  const now = new Date();
+
+  // =========================
+  // 翌日の朝5時
+  // =========================
+  const submitEndAt = new Date(start);
+  submitEndAt.setDate(submitEndAt.getDate() + 1);
+  submitEndAt.setHours(EXCHANGE_SUBMIT_END_HOUR, 0, 0, 0);
+
+  // =========================
   // 翌日の朝6時
+  // =========================
   const openAt = new Date(start);
   openAt.setDate(openAt.getDate() + 1);
   openAt.setHours(EXCHANGE_OPEN_HOUR, 0, 0, 0);
 
-  const isExchangeOpen = new Date() >= openAt;
+  const isSubmitOpen = now < submitEndAt;
+  const isExchangeOpen = now >= openAt;
 
   // =========================
   // 現在のExchangeにおける最新の自分の提出
@@ -221,7 +240,7 @@ export default function Home() {
                 今回の日記は提出しました。
               </p>
             </>
-          ) : (
+          ) : isSubmitOpen ? (
             <>
               <p className="mt-2 text-sm text-gray-500">
                 今回の日記を書いてください。
@@ -233,6 +252,16 @@ export default function Home() {
               >
                 日記を書く
               </Link>
+            </>
+          ) : (
+            <>
+              <p className="mt-3 text-sm font-medium text-gray-800">
+                本日の提出受付は終了しました。
+              </p>
+
+              <p className="mt-2 text-sm text-gray-500">
+                日記の提出は当日の20時から翌日の朝5時までです。
+              </p>
             </>
           )}
         </section>
